@@ -1,0 +1,108 @@
+
+# GitHub Actions workflow
+# GitHub automatically looks for workflow files inside .github/workflows/
+
+# Give workflow a meaningful name
+name: Smart Agriculture ML API - CI Pipeline
+
+# Define when GitHub should run this workflow
+on:
+  # Run CI whenever code is pushed to the main branch
+  push:
+    branches:
+      - main
+
+  # Also validate proposed changes before they are merged
+  pull_request:
+    branches:
+      - main
+
+# Permissions are restricted to reading repo content and publishing packages
+permissions:
+  contents: read
+  packages: write
+
+# Define the jobs that make up the pipeline
+jobs:
+
+  # JOB-1 Test API - Validates the ML pipeline and API
+  test:
+    name: Run ML Pipeline and API Tests
+
+    # GitHub provides a fresh Ubuntu VM for this job
+    runs-on: ubuntu-latest
+
+    # Steps
+    steps:
+      # Step-1: Download the repository content to the runner
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Step-2: Install Python on runner
+      - name: Install Python on Runner
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Step-3: Install dependencies needed to run tests
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Step-4: Validate agricultural dataset
+      - name: Validate Crop Yield Dataset
+        run: |
+          python -c "from train import load_data; df = load_data(); print('Dataset shape:', df.shape); print('Dataset validation successful')"
+
+      # Step-5: Execute automated tests
+      - name: Run Automated Tests
+        run: python -m pytest -v
+
+  # JOB-2 Build and publish Docker Image
+  build:
+    name: Build and Publish Docker Image
+
+    # Run only after successful completion of test job
+    needs: test
+
+    runs-on: ubuntu-latest
+
+    # Publish only when code is pushed to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      # Step-1: Download repository source code
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # Step-2: Enable Docker Buildkit functionality
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Step-3: Authenticate with GitHub Container Registry
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step-4: Generate image names and tags
+      - name: Generate Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      # Step-5: Build the Docker image and push it to GHCR
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
